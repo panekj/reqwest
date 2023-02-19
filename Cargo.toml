@@ -144,8 +144,13 @@ brotli_crate = { package = "brotli", version = "3.3.0" }
 doc-comment = "0.3"
 tokio = { version = "1.0", default-features = false, features = ["macros", "rt-multi-thread"] }
 
-[target.'cfg(windows)'.dependencies]
-winreg = "0.10"
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.36"
+features = [
+    "Win32_System_Registry",
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+]
 
 # wasm
 
