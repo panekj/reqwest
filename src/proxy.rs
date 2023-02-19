@@ -13,10 +13,6 @@ use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::net::IpAddr;
-#[cfg(target_os = "windows")]
-use winreg::enums::HKEY_CURRENT_USER;
-#[cfg(target_os = "windows")]
-use winreg::RegKey;
 
 /// Configuration of a proxy that a `Client` should pass requests to.
 ///
@@ -868,12 +864,105 @@ fn is_cgi() -> bool {
 
 #[cfg(target_os = "windows")]
 fn get_from_registry_impl() -> Result<RegistryProxyValues, Box<dyn Error>> {
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let internet_setting: RegKey =
-        hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")?;
-    // ensure the proxy is enable, if the value doesn't exist, an error will returned.
-    let proxy_enable: u32 = internet_setting.get_value("ProxyEnable")?;
-    let proxy_server: String = internet_setting.get_value("ProxyServer")?;
+    use std::{os::windows::prelude::OsStrExt, ffi::OsStr, iter::once};
+
+    use windows::{Win32::System::Registry::{REG_VALUE_TYPE, RegOpenKeyExW, KEY_READ, HKEY, RegQueryValueExW, HKEY_CURRENT_USER}, core::PCWSTR};
+
+    let mut reg_key = HKEY::default();
+    let path = OsStr::new("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+            .encode_wide()
+            .chain(once(0u16))
+            .collect::<Vec<u16>>();
+    let result = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(path.as_ptr() as *mut u16),
+            0,
+            KEY_READ,
+            &mut reg_key,
+        )
+    };
+
+    if result.is_err() {
+        return Err(Box::new(std::io::Error::from_raw_os_error(result.0 as i32)))
+    }
+
+    let mut buffer_size: u32 = 0;
+    let proxy_enable_key = OsStr::new("ProxyEnable")
+        .encode_wide()
+        .chain(once(0u16))
+        .collect::<Vec<u16>>();
+    // let result = unsafe {
+    //     RegQueryValueExW(
+    //         hkey,
+    //         value.as_ptr(),
+    //         std::ptr::null_mut(),
+    //         std::ptr::null_mut(),
+    //         std::ptr::null_mut(),
+    //         buf,
+    //     )
+    // };
+
+    let mut buf = [0u8; 4];
+    let mut reg_value_type = REG_VALUE_TYPE(0);
+
+    let result = unsafe {
+        RegQueryValueExW(
+        reg_key,
+        PCWSTR(proxy_enable_key.as_ptr() as *mut u16),
+        std::ptr::null_mut(),
+        &mut reg_value_type,
+        buf.as_mut_ptr() as *mut u8,
+        &mut buffer_size,
+        )
+    };
+
+    if result.is_err() {
+        return Err(Box::new(std::io::Error::from_raw_os_error(result.0 as i32)))
+    }
+
+    let proxy_enable = u32::from_le_bytes(buf);
+
+    let mut buffer_size: u32 = 0;
+    let proxy_server_key = OsStr::new("ProxyServer")
+        .encode_wide()
+        .chain(once(0u16))
+        .collect::<Vec<u16>>();
+
+    let result = unsafe {
+        RegQueryValueExW(
+            reg_key,
+            PCWSTR(proxy_server_key.as_ptr() as *mut u16),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut buffer_size,
+        )
+    };
+
+    if result.is_err() {
+        return Err(Box::new(std::io::Error::from_raw_os_error(result.0 as i32)))
+    }
+
+    let mut buf: Vec<u16> = vec![0u16; (buffer_size / 2 + buffer_size % 2) as usize];
+    let mut reg_value_type = REG_VALUE_TYPE(0);
+
+    let result = unsafe {
+        RegQueryValueExW(
+        reg_key,
+        PCWSTR(proxy_enable_key.as_ptr() as *mut u16),
+        std::ptr::null_mut(),
+        &mut reg_value_type,
+        buf.as_mut_ptr() as *mut u8,
+        &mut buffer_size,
+        )
+    };
+
+    if result.is_err() {
+        return Err(Box::new(std::io::Error::from_raw_os_error(result.0 as i32)))
+    }
+
+    let proxy_server = String::from_utf16_lossy(&buf);
 
     Ok((proxy_enable, proxy_server))
 }
